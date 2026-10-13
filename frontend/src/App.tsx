@@ -1,122 +1,51 @@
 import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useQuery } from '@tanstack/react-query'
+import { api } from './api/client'
+import type { AnalyzeSelection, Selection } from './api/types'
+import { HazardSelect } from './components/HazardSelect'
+import { RegionPicker } from './components/RegionPicker'
+import { YearRange } from './components/YearRange'
+import { selectionProblem } from './lib/region'
+import { paramsToSelection, selectionToParams } from './lib/urlState'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const meta = useQuery({ queryKey: ['meta'], queryFn: api.meta, staleTime: Infinity })
+  const minYear = meta.data?.years.min ?? 1981
+  const maxYear = meta.data?.years.max ?? new Date().getFullYear() - 1
+
+  const [initial] = useState(() => paramsToSelection(new URLSearchParams(window.location.search)))
+  const [selection, setSelection] = useState<Selection>(initial)
+  const [submitted, setSubmitted] = useState<AnalyzeSelection | null>(() =>
+    initial.region ? { ...initial, region: initial.region } : null,
+  )
+  const problem = selectionProblem(selection, minYear, maxYear)
+
+  function runAnalysis() {
+    if (problem || !selection.region) return
+    const next = { ...selection, region: selection.region }
+    setSubmitted(next)
+    window.history.replaceState(null, '', `?${selectionToParams(next)}`)
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <div className="app">
+      <header className="app-header">
+        <h1>Climate Hazard Trend Analyzer</h1>
+        <p className="muted">How have heatwaves changed where you live? Data: NASA POWER, 1981 onward.</p>
+      </header>
+      <main className="layout">
+        <aside className="controls">
+          <HazardSelect hazards={meta.data?.hazards ?? []} value={selection.hazard} onChange={(hazard) => setSelection({ ...selection, hazard })} />
+          <RegionPicker region={selection.region} onChange={(region) => setSelection({ ...selection, region })} />
+          <YearRange min={minYear} max={maxYear} start={selection.startYear} end={selection.endYear}
+            onChange={(startYear, endYear) => setSelection({ ...selection, startYear, endYear })} />
+          <button type="button" className="primary" disabled={problem !== null} onClick={runAnalysis}>Analyze</button>
+          {problem && selection.region && <p className="hint">{problem}</p>}
+        </aside>
+        <section className="results">
+          {submitted ? <pre>{JSON.stringify(submitted, null, 2)}</pre> : <p className="muted">Pick a region and press Analyze.</p>}
+        </section>
+      </main>
+    </div>
   )
 }
-
-export default App
