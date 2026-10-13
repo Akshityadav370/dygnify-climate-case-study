@@ -1,6 +1,8 @@
 import type { Analysis, AnalyzeSelection, GeocodeResult, MetaResponse } from './types'
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
+// Production (Vercel services): the API is on the same domain under /api, so the base is ''.
+// Local dev: the FastAPI server runs separately on port 8000. VITE_API_BASE_URL overrides both.
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '')
 
 export class ApiError extends Error {
   status: number

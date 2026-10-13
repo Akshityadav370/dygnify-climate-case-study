@@ -4,12 +4,13 @@ Pick a city, a state or a lat-lon box and a year range. The app downloads daily 
 detects heatwaves using a percentile rule, tests whether they are really increasing, and shows the result
 as charts, a table of events and plain-language insights.
 
-- **Live app:** _add Vercel URL_ · **API docs:** _add Render URL_/docs
+- **Live app:** _add Vercel URL_ · **API docs:** _add Vercel URL_/docs
 
 ## Architecture
 
 ```
-React + TS (Vercel) ──HTTPS──► FastAPI (Render) ──► Open-Meteo (primary) / NASA POWER (fallback)
+React + TS ──/api/*──► FastAPI   ──► Open-Meteo (primary) / NASA POWER (fallback)
+(one Vercel project, two services: frontend at /, backend at /api, /docs)
                                      │              Open-Meteo geocoding, Nominatim (states)
                                      ▼
                               MongoDB Atlas
@@ -102,7 +103,7 @@ Errors always have the shape `{"error": {"code", "message"}}`:
   - Nominatim is throttled to 1 request/s.
   - Responses are validated (units, dates, coordinates) before anything is cached.
 - **Rate limiting:** per IP with slowapi. The client IP is taken from the `X-Forwarded-For` entry added by the trusted proxy, so a spoofed header doesn't help.
-- **HTTP:** CORS is restricted to the frontend origin; responses are GZip-compressed; GET responses that never change get `Cache-Control` headers.
+- **HTTP:** in production the frontend and API share one domain, so no cross-origin access is needed; CORS stays restricted to configured origins (local dev). Responses are GZip-compressed; GET responses that never change get `Cache-Control` headers.
 - **Two cache layers:** raw weather per grid cell (shared across regions and year ranges) and computed analyses (with an expiry).
 
 ## Local setup
@@ -122,14 +123,19 @@ cd frontend && cp .env.example .env && npm install && npm run dev     # http://l
 
 1. **MongoDB Atlas** (free M0 tier):
    - Create a cluster and a database user.
-   - Allow access from anywhere (`0.0.0.0/0`), because Render's free tier has no static IP.
+   - Allow access from anywhere (`0.0.0.0/0`), because Vercel Functions have no fixed outbound IP on the free plan.
    - Copy the connection string.
-2. **Render:**
-   - New → Blueprint → this repo. It uses `render.yaml`.
-   - Set `MONGO_URI`, `CORS_ORIGINS=https://<your-app>.vercel.app` (comma-separate several origins) and `NOMINATIM_USER_AGENT=climate-hazard-analyzer/1.0 (<contact>)`.
-   - Free instances sleep when idle, so the first request can take 30–60 s.
-3. **Vercel:** import the repo with root directory `frontend` and framework Vite, and set the environment variable `VITE_API_BASE_URL=https://<render-app>.onrender.com`.
-4. Run the seed script against the Render URL so the demo cities load instantly.
+2. **Vercel** (one project, two [services](https://vercel.com/docs/services) defined in `vercel.json`):
+   - Import this repo with the **Root Directory left at the repository root**, so Vercel reads `vercel.json`.
+   - `frontend` (Vite) serves `/`; `backend` (FastAPI, `app/main.py`) serves `/api/*`, `/docs` and `/openapi.json`.
+     The browser calls `/api` on the same domain, so no API URL or CORS setting is needed.
+   - Environment variables: `MONGO_URI`, `NOMINATIM_USER_AGENT=climate-hazard-analyzer/1.0 (<contact>)` and
+     `TRUSTED_PROXY_HOPS=1` (use the client IP from Vercel's `X-Forwarded-For` for rate limiting).
+     Do **not** set `VITE_API_BASE_URL`.
+3. Run the seed script against the deployment so the demo cities load instantly:
+   `uv run python -m scripts.seed --api https://<your-app>.vercel.app`.
+
+The backend also has a `Dockerfile` for running it as a container elsewhere.
 
 ## Assumptions
 
@@ -146,7 +152,9 @@ cd frontend && cp .env.example .env && npm install && npm run dev     # http://l
 - **Regions:** box and state results are averaged over up to 9 grid points. States larger than 5° × 5° are
   clipped to a 5° × 5° box around their centre, and the UI says so.
 - **Year range:** the last selectable year is the last complete calendar year.
-- **Scale:** a single backend instance, so in-memory rate limits and per-key locks are enough.
+- **Scale:** rate limits and per-key locks live in memory. On Vercel each function instance keeps its own
+  counters, so under heavy load the limits are per instance rather than global. Fine for a demo; a shared
+  store (Redis) would make them global.
 
 ## What I'd improve with more time
 
