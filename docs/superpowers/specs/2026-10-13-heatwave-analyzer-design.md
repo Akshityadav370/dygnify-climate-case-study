@@ -1,7 +1,7 @@
 # Climate Hazard Trend Analyzer — Heatwave Design Spec
 
 - **Date:** 2026-10-13
-- **Status:** Approved in conversation, pending written-spec review
+- **Status:** Approved 2026-10-13; revised same day — data source changed to NASA POWER (primary) + Open-Meteo (fallback) after measuring Open-Meteo's free-tier quota
 - **Scope:** Heatwave hazard end-to-end (frontend, backend, database, deployment). Other hazards (heavy rainfall, drought) are later, separate specs that plug into the same pipeline.
 
 ---
@@ -11,7 +11,7 @@
 **Goal:** A deployed web app where a user picks a region and a year range and sees how heatwaves in that region have changed over time, with statistically honest summary insights.
 
 **Success criteria**
-1. A user can select a region as a **city**, a **state**, or a **custom lat-lon box**, choose a year range (1940 … last complete year), and get results for the **Heatwave** hazard (selected by default).
+1. A user can select a region as a **city**, a **state**, or a **custom lat-lon box**, choose a year range (1981 … last complete year), and get results for the **Heatwave** hazard (selected by default).
 2. Results include yearly time-series charts (frequency, duration, intensity), a trend line, a 5-year rolling mean, the list of detected events, and rule-generated insight sentences that only claim a trend when it is statistically significant.
 3. Weather data is fetched from a public API, cleaned, cached and stored in **MongoDB**; analysis results are stored in MongoDB and API calls read from it.
 4. The backend validates all input, rate-limits per IP, and accesses external APIs safely (timeouts, retries, fixed hosts).
@@ -26,7 +26,7 @@
 
 | Layer | Choice |
 |---|---|
-| Backend | Python 3.12, FastAPI, Pydantic v2, httpx (async), pandas/numpy, pymannkendall (or own implementation), matplotlib (PDF/plots), slowapi (rate limiting), motor (async MongoDB driver) |
+| Backend | Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, httpx (async), pandas/numpy, scipy (normal CDF for Mann-Kendall; Sen/MK implemented in our own code for explainability), matplotlib (PDF/plots), slowapi (rate limiting), PyMongo's native async client `AsyncMongoClient` (Motor is deprecated) |
 | Database | MongoDB Atlas M0 (prod), MongoDB in Docker (local dev) |
 | Frontend | React + TypeScript + Vite, TanStack Query, Chart.js via react-chartjs-2, Leaflet via react-leaflet |
 | Hosting | Frontend: Vercel. Backend: Render free web service. DB: Atlas M0 |
@@ -36,11 +36,19 @@
 
 | Source | Use | Auth |
 |---|---|---|
-| Open-Meteo Historical Weather API — `https://archive-api.open-meteo.com/v1/archive` (ERA5 reanalysis, ~25 km grid, daily, 1940 → present) | Daily `temperature_2m_max` (and `precipitation_sum`, stored for future hazards) | None |
+| **NASA POWER Daily API** — `https://power.larc.nasa.gov/api/temporal/daily/point` (MERRA-2 reanalysis, 0.5° × 0.625° grid, daily, 1981 → present) | **Primary.** Daily `T2M_MAX` (°C) and `PRECTOTCORR` (mm/day, stored for future hazards). Missing values are encoded as `-999`. | None |
+| **Open-Meteo Historical Weather API** — `https://archive-api.open-meteo.com/v1/archive` (ERA5, daily) | **Fallback** for a single grid point when POWER fails (timeout, 5xx, 429, invalid response). Fetches `temperature_2m_max`, `precipitation_sum` for the same date range. | None |
 | Open-Meteo Geocoding — `https://geocoding-api.open-meteo.com/v1/search` | City search → lat/lon | None |
 | Nominatim (OpenStreetMap) — `https://nominatim.openstreetmap.org/search` | State search → bounding box | None; max 1 req/s, custom `User-Agent` required |
 
-NOAA NCEI Access Data Service (station data) is a possible future second source; not in this scope.
+**Why POWER is primary (measured 2026-10-13):** Open-Meteo's free tier counts every ~2 weeks of data as one API call (600/min, 5,000/hour, 10,000/day). One point's 1981–2025 history ≈ 1,170 calls, so only a handful of new locations per day are possible and multi-point boxes are infeasible; a 2-point 86-year request took 28 s and then hit the per-minute limit. POWER returned 1981–2025 for one point in 2.3 s with no published quota. Open-Meteo is kept as a fallback, which also demonstrates multi-source handling (different field names, units strings, missing-value conventions).
+
+**Fallback rules**
+- Fallback is per grid point; a box can mix sources. Each `weather_daily` doc records its `source`; each analysis lists `sources_used`, and a caveat is added whenever the fallback was used.
+- If both providers fail for any point, the analysis fails with 502/504 (no partial regional averages).
+- Fallback data is normalized to the same internal shape (°C, mm, `null` for missing) before storage.
+
+NOAA NCEI station data is a possible future addition; not in this scope.
 
 ## 4. Architecture
 
@@ -59,7 +67,7 @@ React (Vercel) ──HTTPS──► FastAPI (Render) ──► Open-Meteo / Nomi
 | Module | Responsibility | Depends on |
 |---|---|---|
 | `api/` | Routes, request/response models, error handlers, rate limits | services |
-| `services/region.py` | Resolve a region (point or box) into a list of ERA5 grid points + normalized cache key | — |
+| `services/region.py` | Resolve a region (point or box) into a list of MERRA-2 grid points + normalized cache key | — |
 | `services/ingest.py` | Get daily series for grid points: read `weather_daily`, fetch missing points from Open-Meteo, validate, store | clients, db |
 | `services/cleaning.py` | Units check, physical bounds, gap interpolation (≤2 days), year quality flags | — |
 | `hazards/base.py` | Hazard interface: `analyze(series, years, params) -> HazardResult` | — |
@@ -76,17 +84,17 @@ Adding a hazard later = add `hazards/<name>.py` implementing the same interface 
 
 ### `POST /api/analyze` flow
 1. Pydantic validates input (see §7).
-2. `region.py` snaps the region to the 0.25° ERA5 grid and computes the cache key `sha256(hazard | normalized region | start-end | algo_version)`.
+2. `region.py` snaps the region to the MERRA-2 grid (0.5° lat × 0.625° lon) and computes the cache key `sha256(hazard | normalized region | start-end | algo_version)`.
 3. Look up `analyses` by key → if found, return with `cached: true`.
 4. Acquire a per-key `asyncio.Lock` (so concurrent identical requests compute once); re-check the cache.
-5. `ingest.py` loads each grid point from `weather_daily`; points not present are fetched from Open-Meteo (full 1940-01-01 → last complete year, one call with multiple coordinates), validated and stored.
+5. `ingest.py` loads each grid point from `weather_daily`; points not present are fetched from NASA POWER (1981-01-01 → last complete year, one request per point, at most 3 concurrent), falling back to Open-Meteo per point on failure; validated, normalized and stored.
 6. For a box: average the points' daily `tmax` into one regional series (area-average).
 7. Clean → heatwave analysis → trends → insights.
 8. Store in `analyses`, return with `cached: false`.
 
 ### Region handling
 - **City:** single point from geocoding.
-- **Box:** sample a grid of up to 3×3 points evenly inside the box (fewer if the box is smaller than the grid spacing), snapped to 0.25° and de-duplicated. Max box size 5°×5°.
+- **Box:** sample a grid of up to 3×3 points evenly inside the box (centres of a 3×3 subdivision), each snapped to the MERRA-2 grid and de-duplicated (small boxes collapse to 1–4 points). Max box size 5°×5°.
 - **State:** Nominatim bounding box → treated as a box. If the state's box exceeds 5°×5°, it is shrunk around its centre to 5°×5°, and the response includes a caveat saying so.
 
 ## 5. Heatwave logic
@@ -94,7 +102,8 @@ Adding a hazard later = add `hazards/<name>.py` implementing the same interface 
 ### 5.1 Cleaning
 | Issue | Rule |
 |---|---|
-| Units | Request °C; verify `daily_units.temperature_2m_max == "°C"`, otherwise reject as upstream error |
+| Units | Verify the provider's unit string (POWER `parameters.T2M_MAX.units == "C"`; Open-Meteo `daily_units.temperature_2m_max == "°C"`), otherwise reject as upstream error |
+| Fill values | POWER `-999` (or the header's `fill_value`) → missing; Open-Meteo `null` → missing |
 | Impossible values | `tmax < -90` or `tmax > 60` → missing |
 | Gaps of 1–2 consecutive missing days | Linear interpolation |
 | Gaps of ≥3 days | Remain missing; a missing day breaks a heatwave run |
@@ -104,9 +113,9 @@ Adding a hazard later = add `hazards/<name>.py` implementing the same interface 
 A `data_quality` report (total days, values removed, values interpolated, low-quality years) is returned with each analysis.
 
 ### 5.2 Threshold climatology
-- Baseline: fixed **1961–1990**, independent of the user's selected range.
+- Baseline: fixed **1981–2010** (a WMO 30-year climate normal and the earliest full 30 years POWER provides), independent of the user's selected range.
 - For each day-of-year *d* (365-day calendar), collect baseline `tmax` values from days *d−7 … d+7* (wrapping around year ends) across all baseline years → 95th percentile → `threshold[d]`.
-- Parameters (stored with each analysis): `percentile=95`, `window=7`, `baseline=[1961,1990]`, `min_days=3`.
+- Parameters (stored with each analysis): `percentile=95`, `window=7`, `baseline=[1981,2010]`, `min_days=3`.
 
 ### 5.3 Event detection
 - A **heatwave** is a run of **≥3 consecutive days** with `tmax > threshold[doy]`.
@@ -135,17 +144,17 @@ A `data_quality` report (total days, values removed, values interpolated, low-qu
 - Significant: "Heatwave days in {region} increased by about {pct}% between {start} and {end} ({sen:+.1f} days/decade, statistically significant, p = {p:.3f})."
 - Not significant: "Heatwave {metric} shows a slight {upward/downward} change, but it is not statistically significant (p = {p:.2f}) and may reflect natural year-to-year variability."
 - Insufficient years / no events: explicit plain statements.
-- Standard caveats: ERA5 is ~25 km gridded reanalysis and smooths local extremes; the threshold is relative to the 1961–1990 local climate; box/state results are area-averaged.
+- Standard caveats: MERRA-2 (NASA POWER) is ~50 km gridded reanalysis and smooths local extremes; the threshold is relative to the 1981–2010 local climate; box/state results are area-averaged; fallback-source note when Open-Meteo was used.
 
 ## 6. MongoDB schema
 
-### `weather_daily` — raw cache, one document per ERA5 grid point
+### `weather_daily` — raw cache, one document per MERRA-2 grid cell
 ```json
 {
-  "_id": "openmeteo:28.50:77.25",
-  "source": "open-meteo-era5",
-  "lat": 28.50, "lon": 77.25,
-  "start_date": "1940-01-01",
+  "_id": "28.500:77.500",
+  "source": "nasa-power",
+  "lat": 28.5, "lon": 77.5,
+  "start_date": "1981-01-01",
   "end_date": "2025-12-31",
   "units": { "tmax": "°C", "precip": "mm" },
   "tmax": [18.7, 18.5, null, ...],
@@ -153,7 +162,8 @@ A `data_quality` report (total days, values removed, values interpolated, low-qu
   "fetched_at": "2026-10-13T10:00:00Z"
 }
 ```
-- Array index = day offset from `start_date`. ~31k values per array (~300 KB doc).
+- `_id` = snapped grid cell (source-independent, so a fallback-filled cell is reused). `source` is `nasa-power` or `open-meteo-era5`.
+- Array index = day offset from `start_date`. ~16.4k values per array (~200 KB doc).
 - No expiry. If `end_date` < last complete year, fetch only the missing tail and append.
 
 ### `analyses` — computed results cache
@@ -162,9 +172,10 @@ A `data_quality` report (total days, values removed, values interpolated, low-qu
   "_id": "<sha256 cache key>",
   "hazard": "heatwave",
   "algo_version": "v1",
-  "region": { "type": "point|box", "label": "Delhi, IN", "bbox": null, "points": [[28.50, 77.25]] },
+  "region": { "type": "point|box", "label": "Delhi, IN", "bbox": null, "points": [[28.5, 77.5]] },
+  "sources_used": ["nasa-power"],
   "years": { "start": 1990, "end": 2020 },
-  "params": { "percentile": 95, "min_days": 3, "window": 7, "baseline": [1961, 1990] },
+  "params": { "percentile": 95, "min_days": 3, "window": 7, "baseline": [1981, 2010] },
   "yearly": [ { "year": 1990, "HWN": 2, "HWF": 7, "HWD": 4, "HWM": 1.8, "HWA": 45.1, "low_quality": false } ],
   "events": [ { "start": "1990-05-12", "end": "1990-05-15", "days": 4, "peak_tmax": 45.1, "mean_exceedance": 1.9 } ],
   "threshold_by_doy": [ "...365 values" ],
@@ -215,7 +226,7 @@ The `analyses` document plus `id`, `cached`, and a `chart` block with plot-ready
 ### Validation
 - `hazard`: enum.
 - lat ∈ [−90, 90], lon ∈ [−180, 180]; box: `south < north`, `west < east`, each side ≤ 5°.
-- Years ∈ [1940, last complete year]; `start_year ≤ end_year`.
+- Years ∈ [1981, last complete year]; `start_year ≤ end_year`.
 - `q`: trimmed, 2–100 chars. `label`: ≤100 chars, rendered as plain text only.
 - `id` path param: 64-char hex regex.
 
@@ -243,7 +254,7 @@ Single page, controls left, results right; stacks on mobile.
 |---|---|
 | `HazardSelect` | Heatwave default; other hazards shown disabled ("coming soon") |
 | `RegionPicker` | Tabs: City (debounced search → dropdown), State (search → bbox), Draw box (drag rectangle on Leaflet map). Shared map shows marker or rectangle. Warns when box > 5°×5° |
-| `YearRange` | Start/end dropdowns 1940…last complete year; default 1990–2020; warning if span < 10 years |
+| `YearRange` | Start/end dropdowns 1981…last complete year; default 1990–2020; warning if span < 10 years |
 | `SummaryCards` | Avg heatwave days/yr, avg events/yr, longest event, trend badge (▲/▼ significant, or "no significant trend") |
 | `InsightPanel` | Insight sentences + caveats |
 | `MetricChart` | Chart.js bars per year + 5-yr rolling mean line + dashed trend line; metric toggle HWF/HWN/HWD/HWM/HWA; tooltips; low-quality years faded |
@@ -268,15 +279,16 @@ Single page, controls left, results right; stacks on mobile.
 - Local dev: `docker compose up` for MongoDB; backend `uvicorn`; frontend `npm run dev`.
 
 ## 11. Assumptions (to be repeated in README)
-- ERA5 reanalysis (via Open-Meteo) is an acceptable stand-in for observed station data; it is gap-free and globally consistent but smooths local extremes.
-- Heatwave definition follows the brief (≥3 consecutive days above the 95th percentile) using a calendar-day percentile with a ±7-day window over 1961–1990.
+- MERRA-2 reanalysis (via NASA POWER), with ERA5 (via Open-Meteo) as fallback, is an acceptable stand-in for observed station data; it is globally consistent but smooths local extremes. Analysis is limited to 1981 onward.
+- Heatwave definition follows the brief (≥3 consecutive days above the 95th percentile) using a calendar-day percentile with a ±7-day window over 1981–2010.
 - Regional (box/state) analysis uses the area-average of up to 9 grid points.
 - "Last complete year" = the previous calendar year (2025 as of this spec).
 - Single backend instance; in-memory rate limiting and per-key locks are sufficient at this scale.
 
 ## 12. Future work (README "with more time")
 - Heavy rainfall and drought hazards using stored `precip`.
-- NOAA station data as a second source, with comparison against ERA5.
+- Longer history (pre-1981) via a paid Open-Meteo plan or Copernicus CDS bulk download.
+- NOAA station data as a second source, with comparison against reanalysis.
 - Redis-backed rate limiting and a job queue for multi-instance deployments.
 - Per-grid-point heatwave maps (choropleth) instead of area-average only.
 - Configurable percentile/duration/baseline in the UI.
