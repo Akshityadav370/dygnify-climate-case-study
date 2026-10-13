@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import './charts/setup'
 import { api } from './api/client'
 import type { AnalyzeSelection, Selection } from './api/types'
+import { ErrorBanner } from './components/ErrorBanner'
 import { HazardSelect } from './components/HazardSelect'
+import { LoadingSkeleton } from './components/LoadingSkeleton'
 import { RegionPicker } from './components/RegionPicker'
+import { Results } from './components/Results'
 import { YearRange } from './components/YearRange'
 import { selectionProblem } from './lib/region'
 import { paramsToSelection, selectionToParams } from './lib/urlState'
@@ -18,6 +22,13 @@ export default function App() {
   const [submitted, setSubmitted] = useState<AnalyzeSelection | null>(() =>
     initial.region ? { ...initial, region: initial.region } : null,
   )
+  const analysis = useQuery({
+    queryKey: ['analysis', submitted],
+    queryFn: () => api.analyze(submitted!),
+    enabled: submitted !== null,
+    staleTime: Infinity,
+    retry: false,
+  })
   const problem = selectionProblem(selection, minYear, maxYear)
 
   function runAnalysis() {
@@ -43,7 +54,15 @@ export default function App() {
           {problem && selection.region && <p className="hint">{problem}</p>}
         </aside>
         <section className="results">
-          {submitted ? <pre>{JSON.stringify(submitted, null, 2)}</pre> : <p className="muted">Pick a region and press Analyze.</p>}
+          {!submitted && (
+            <div className="card empty">
+              <h2>Pick a region to begin</h2>
+              <p className="muted">Search a city or state, click the map, or draw a box, then press Analyze.</p>
+            </div>
+          )}
+          {submitted && analysis.isPending && <LoadingSkeleton />}
+          {analysis.isError && <ErrorBanner error={analysis.error} onRetry={() => analysis.refetch()} />}
+          {analysis.data && <Results analysis={analysis.data} />}
         </section>
       </main>
     </div>
