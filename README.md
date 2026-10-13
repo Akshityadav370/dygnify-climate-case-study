@@ -4,7 +4,7 @@ Pick a city, a state or a lat-lon box and a year range. The app downloads daily 
 detects heatwaves using a percentile rule, tests whether they are really increasing, and shows the result
 as charts, a table of events and plain-language insights.
 
-- **Live app:** _add Vercel URL_ · **API docs:** _add Vercel URL_/docs
+- **Live app:** https://dygnify-climate-case-study.vercel.app · **API docs:** https://dygnify-climate-case-study.vercel.app/docs
 
 ## Architecture
 
