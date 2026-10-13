@@ -142,3 +142,24 @@ class AnalysisOut(BaseModel):
     data_quality: DataQuality
     chart: ChartOut
     created_at: datetime
+
+
+class BBox(BaseModel):
+    south: float
+    west: float
+    north: float
+    east: float
+
+
+class GeocodeResult(BaseModel):
+    kind: Literal["city", "state"]
+    name: str
+    label: str
+    lat: float
+    lon: float
+    bbox: BBox | None
+    clipped: bool
+
+
+class GeocodeResponse(BaseModel):
+    results: list[GeocodeResult]
