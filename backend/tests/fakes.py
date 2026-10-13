@@ -1,18 +1,20 @@
 """Synthetic provider responses for tests (no network)."""
 
 import math
+import random
 from datetime import date, datetime, timedelta
 
 import httpx
 
 
 def synthetic_tmax(d: date) -> float:
-    """Seasonal cycle + deterministic wiggle + steady warming (~2.2 °C over 1981-2025)."""
+    """Seasonal cycle + multi-day warm/cool spells + seeded noise + steady warming (~2.2 °C over 1981-2025)."""
     doy = d.timetuple().tm_yday
     seasonal = 30 + 8 * math.sin(2 * math.pi * (doy - 100) / 365)
-    wiggle = ((d.toordinal() * 7919) % 13 - 6) * 0.4
+    spells = 2.5 * math.sin(2 * math.pi * d.toordinal() / 11)
+    noise = random.Random(d.toordinal()).uniform(-1.5, 1.5)
     warming = 0.05 * (d.year - 1981)
-    return round(seasonal + wiggle + warming, 2)
+    return round(seasonal + spells + noise + warming, 2)
 
 
 def days(start: date, end: date) -> list[date]:

@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -54,3 +55,90 @@ class AnalyzeRequest(StrictModel):
         if not (DATA_START_YEAR <= self.start_year <= self.end_year <= max_year):
             raise ValueError(f"Years must satisfy {DATA_START_YEAR} ≤ start_year ≤ end_year ≤ {max_year}.")
         return self
+
+
+class YearlyRow(BaseModel):
+    year: int
+    HWN: int
+    HWF: int
+    HWD: int
+    HWM: float | None
+    HWA: float | None
+    low_quality: bool
+
+
+class EventOut(BaseModel):
+    start: date
+    end: date
+    days: int
+    peak_tmax: float
+    mean_exceedance: float
+
+
+class TrendOut(BaseModel):
+    n_years: int
+    sen_per_decade: float | None
+    mk_p: float | None
+    significant: bool
+    ols_slope: float | None
+    ols_intercept: float | None
+    change_kind: Literal["pct", "abs"] | None
+    change_value: float | None
+    reason: str | None
+
+
+class ChartSeries(BaseModel):
+    values: list[float | None]
+    rolling5: list[float | None]
+    trendline: list[float | None]
+
+
+class ChartOut(BaseModel):
+    years: list[int]
+    series: dict[str, ChartSeries]
+
+
+class DataQuality(BaseModel):
+    days: int
+    removed: int
+    interpolated: int
+    low_quality_years: list[int]
+
+
+class RegionOut(BaseModel):
+    type: Literal["point", "box"]
+    label: str
+    bbox: dict[str, float] | None
+    points: list[list[float]]
+
+
+class YearsOut(BaseModel):
+    start: int
+    end: int
+
+
+class ParamsOut(BaseModel):
+    percentile: float
+    min_days: int
+    window: int
+    baseline: list[int]
+
+
+class AnalysisOut(BaseModel):
+    id: str
+    cached: bool
+    hazard: str
+    algo_version: str
+    region: RegionOut
+    sources_used: list[str]
+    years: YearsOut
+    params: ParamsOut
+    yearly: list[YearlyRow]
+    events: list[EventOut]
+    threshold_by_doy: list[float | None]
+    trends: dict[str, TrendOut]
+    insights: list[str]
+    caveats: list[str]
+    data_quality: DataQuality
+    chart: ChartOut
+    created_at: datetime

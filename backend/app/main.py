@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api import meta
+from app.api import analyze, meta
 from app.clients.http import UpstreamClient
 from app.config import Settings, get_settings
 from app.db import create_mongo_client, ensure_indexes
@@ -44,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(meta.router, prefix="/api")
+    app.include_router(analyze.router, prefix="/api")
     return app
 
 
