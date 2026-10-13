@@ -1,0 +1,166 @@
+# Climate Hazard Trend Analyzer — Heatwaves
+
+Pick a city, a state or a lat-lon box and a year range. The app downloads daily maximum temperatures,
+detects heatwaves using a percentile rule, tests whether they are really increasing, and shows the result
+as charts, a table of events and plain-language insights.
+
+- **Live app:** _add Vercel URL_ · **API docs:** _add Render URL_/docs
+
+## Architecture
+
+```
+React + TS (Vercel) ──HTTPS──► FastAPI (Render) ──► NASA POWER (primary) / Open-Meteo (fallback)
+                                     │              Open-Meteo geocoding, Nominatim (states)
+                                     ▼
+                              MongoDB Atlas
+                 weather_daily · analyses · geocode_cache
+```
+
+How `POST /api/analyze` works:
+1. Validate the input.
+2. Snap the region to the MERRA-2 grid (0.5° × 0.625°).
+3. If this analysis is already cached, return it.
+4. Otherwise, load each grid cell's 1981→present daily series from `weather_daily`. Cells that are missing are fetched from NASA POWER, falling back to Open-Meteo.
+5. Clean the data and average the points.
+6. Detect heatwaves, then compute trends and insights.
+7. Store the result with a 30-day expiry.
+
+| Folder | What lives there |
+|---|---|
+| `backend/app/core` | Cleaning and trend statistics (pure functions) |
+| `backend/app/hazards` | Heatwave detection; registry for future hazards |
+| `backend/app/clients` | External APIs: retries, timeouts, validation |
+| `backend/app/services` | Region resolution, cache/ingest, orchestration, insights, geocoding, export |
+| `backend/app/api` | HTTP routes |
+| `frontend/src` | React app (Leaflet map, Chart.js charts, TanStack Query) |
+
+## Data sources
+
+| Source | Use |
+|---|---|
+| [NASA POWER](https://power.larc.nasa.gov/docs/services/api/) daily point API (MERRA-2) | Primary: `T2M_MAX` (°C) and `PRECTOTCORR` (mm/day), 1981→present, no key |
+| [Open-Meteo Historical](https://open-meteo.com/en/docs/historical-weather-api) (ERA5) | Fallback for each grid cell |
+| [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api) | City search |
+| [Nominatim](https://nominatim.org/release-docs/latest/api/Search/) | State bounding boxes (1 request/s, cached 7 days) |
+
+**Why NASA POWER is primary:** Open-Meteo's free tier counts every ~2 weeks of data as one API call,
+with a limit of 10,000 calls per day. One location's 45-year history costs about 1,170 calls, so only a
+handful of new places per day would be possible. NASA POWER returned 45 years for one point in about 2 s,
+with no quota.
+
+## Heatwave logic
+
+1. **Cleaning**
+   - POWER's `-999` fill values and Open-Meteo `null`s become missing values.
+   - Values outside −90…60 °C are removed, and units are checked.
+   - Gaps of up to 2 days are filled by linear interpolation. Longer gaps stay missing and break heatwave runs.
+   - Years with more than 10% missing days are flagged as low quality and excluded from trends.
+2. **Threshold** — for each calendar day, the 95th percentile of daily maximum temperature over
+   1981–2010, using a ±7-day window. Feb 29 uses Feb 28's threshold.
+3. **Event** — 3 or more consecutive days above that day's threshold. An event is counted in the year it starts.
+4. **Yearly metrics**
+   - HWN: number of events.
+   - HWF: number of heatwave days.
+   - HWD: length of the longest event.
+   - HWM: mean °C above the threshold.
+   - HWA: peak temperature.
+5. **Trends**
+   - Sen's slope measures how big the trend is, and is robust to outlier years.
+   - The Mann-Kendall test decides whether the trend is significant (p < 0.05).
+   - An OLS line is drawn on the chart, along with a 5-year rolling mean.
+   - At least 10 usable years are required.
+   - % change is measured along the Sen line, not between two noisy single years. It is only used when the starting value is at least 1; °C metrics report an absolute change instead.
+6. **Insights** — sentences are generated from fixed rules. A trend is only described as an increase or
+   decrease when it is statistically significant.
+
+## API
+
+| Method | Route | Limit / IP |
+|---|---|---|
+| GET | `/api/health` | — |
+| GET | `/api/hazards` | 60/min |
+| GET | `/api/geocode?q=&kind=city\|state` | 30/min |
+| POST | `/api/analyze` | 10/min |
+| GET | `/api/analyses/{id}` | 60/min |
+| GET | `/api/analyses/{id}/export.csv`, `/report.pdf` | 10/min |
+
+Errors always have the shape `{"error": {"code", "message"}}`:
+- 422 for invalid input
+- 404 for an unknown analysis
+- 429 when rate limited, with a `Retry-After` header
+- 502/504 when the upstream provider fails or times out
+
+## Security & performance
+
+- **Input validation:** every input is checked with Pydantic — coordinate ranges, box ≤ 5° × 5°, year range, hazard from a fixed list, and no extra fields.
+- **Database safety:** lookups use SHA-256 ids computed by the server, never query objects supplied by the user.
+- **External APIs:**
+  - Fixed upstream hosts, with parameters URL-encoded by httpx.
+  - Timeouts, a bounded number of retries, and at most 3 concurrent fetches.
+  - Nominatim is throttled to 1 request/s.
+  - Responses are validated (units, dates, coordinates) before anything is cached.
+- **Rate limiting:** per IP with slowapi. The client IP is taken from the `X-Forwarded-For` entry added by the trusted proxy, so a spoofed header doesn't help.
+- **HTTP:** CORS is restricted to the frontend origin; responses are GZip-compressed; GET responses that never change get `Cache-Control` headers.
+- **Two cache layers:** raw weather per grid cell (shared across regions and year ranges) and computed analyses (with an expiry).
+
+## Local setup
+
+Requirements: Docker, Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node 20.19+.
+
+```bash
+docker compose up -d mongo
+cd backend && cp .env.example .env && uv sync && uv run uvicorn app.main:app --reload --port 8000
+cd frontend && cp .env.example .env && npm install && npm run dev     # http://localhost:5173
+```
+
+- **Tests:** `cd backend && uv run pytest` (needs the Mongo container) and `cd frontend && npm test`.
+- **Pre-warm demo cities:** `cd backend && uv run python -m scripts.seed --api http://localhost:8000`.
+
+## Deployment
+
+1. **MongoDB Atlas** (free M0 tier):
+   - Create a cluster and a database user.
+   - Allow access from anywhere (`0.0.0.0/0`), because Render's free tier has no static IP.
+   - Copy the connection string.
+2. **Render:**
+   - New → Blueprint → this repo. It uses `render.yaml`.
+   - Set `MONGO_URI`, `CORS_ORIGINS=["https://<your-app>.vercel.app"]` and `NOMINATIM_USER_AGENT=climate-hazard-analyzer/1.0 (<contact>)`.
+   - Free instances sleep when idle, so the first request can take 30–60 s.
+3. **Vercel:** import the repo with root directory `frontend` and framework Vite, and set the environment variable `VITE_API_BASE_URL=https://<render-app>.onrender.com`.
+4. Run the seed script against the Render URL so the demo cities load instantly.
+
+## Assumptions
+
+- **Data:** reanalysis data (MERRA-2 via NASA POWER, with ERA5 as fallback) stands in for weather-station
+  observations. It is consistent worldwide but smooths local extremes. Analysis starts in 1981, the first
+  year POWER provides.
+- **Baseline:** 1981–2010 (a WMO 30-year normal), fixed regardless of the selected years.
+- **Heatwaves can happen in any season.** The threshold is computed separately for each calendar day, so a
+  heatwave means "unusually hot for this time of year". For example, in Delhi several detected events are
+  winter warm spells (February, December–January), while summer events need temperatures above ~45 °C.
+  This follows the brief's definition and common climate indices; a warm-season-only option would be an
+  easy extension.
+- **Regions:** box and state results are averaged over up to 9 grid points. States larger than 5° × 5° are
+  clipped to a 5° × 5° box around their centre, and the UI says so.
+- **Year range:** the last selectable year is the last complete calendar year.
+- **Scale:** a single backend instance, so in-memory rate limits and per-key locks are enough.
+
+## What I'd improve with more time
+
+- Heavy-rainfall and drought hazards (precipitation is already stored).
+- An option to count only warm-season heatwaves.
+- NOAA GHCN station data as a comparison source, and pre-1981 history via Copernicus CDS.
+- Maps of heatwaves per grid cell, instead of only area averages.
+- Redis-backed rate limiting and a job queue for running multiple backend instances.
+- User-configurable percentile, duration and baseline.
+- Playwright end-to-end tests for the frontend.
+
+## AI tools used
+
+- **Claude Code (Claude Opus 5.5)** was used to:
+  - Explain the climate-statistics concepts: percentile thresholds, Sen's slope, Mann-Kendall and interpolation.
+  - Compare data sources. It measured Open-Meteo's quota cost and NASA POWER's speed with live requests, which led to switching the primary source.
+  - Write the design spec and the implementation plan.
+  - Generate code and tests task by task, and run browser checks of the UI.
+
+  I reviewed every step, chose the architecture and trade-offs, and ran and verified the tests and the app.

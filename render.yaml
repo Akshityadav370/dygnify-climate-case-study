@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: climate-hazard-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB
+        value: climate_hazards
+      - key: CORS_ORIGINS
+        sync: false
+      - key: NOMINATIM_USER_AGENT
+        sync: false
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
