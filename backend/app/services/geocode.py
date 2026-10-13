@@ -10,17 +10,21 @@ from app.config import Settings
 from app.models import MAX_BOX_DEGREES
 
 
-def clip_box(bbox: dict, max_deg: float = MAX_BOX_DEGREES) -> tuple[dict, bool]:
-    """Shrink a box to at most max_deg x max_deg around its centre."""
+def clip_box(bbox: dict, centre: tuple[float, float] | None = None, max_deg: float = MAX_BOX_DEGREES) -> tuple[dict, bool]:
+    """Shrink a box to at most max_deg x max_deg around `centre` (default: the box centre).
+
+    Pass the place's own coordinates as `centre`: the bounding-box centre can lie outside
+    irregular shapes, and for regions crossing the antimeridian (west≈-180, east≈180)
+    it lands on the opposite side of the globe.
+    """
     south, west, north, east = bbox["south"], bbox["west"], bbox["north"], bbox["east"]
+    centre_lat, centre_lon = centre if centre else ((north + south) / 2, (east + west) / 2)
     clipped = False
     if north - south > max_deg:
-        centre = (north + south) / 2
-        south, north = max(-90.0, centre - max_deg / 2), min(90.0, centre + max_deg / 2)
+        south, north = max(-90.0, centre_lat - max_deg / 2), min(90.0, centre_lat + max_deg / 2)
         clipped = True
     if east - west > max_deg:
-        centre = (east + west) / 2
-        west, east = max(-180.0, centre - max_deg / 2), min(180.0, centre + max_deg / 2)
+        west, east = max(-180.0, centre_lon - max_deg / 2), min(180.0, centre_lon + max_deg / 2)
         clipped = True
     box = {"south": round(south, 4), "west": round(west, 4), "north": round(north, 4), "east": round(east, 4)}
     return box, clipped
@@ -39,7 +43,7 @@ async def geocode(
     else:
         results = []
         for state in await search_states(upstream, q):
-            box, clipped = clip_box(state["bbox"])
+            box, clipped = clip_box(state["bbox"], centre=(state["lat"], state["lon"]))
             results.append({**state, "kind": "state", "bbox": box, "clipped": clipped})
 
     expires_at = datetime.now(UTC) + timedelta(days=settings.geocode_ttl_days)

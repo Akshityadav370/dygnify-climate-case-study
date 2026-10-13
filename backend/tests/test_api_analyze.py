@@ -170,3 +170,13 @@ def test_read_analysis_rejects_bad_ids(client):
     missing = client.get("/api/analyses/" + "0" * 64)
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_cached_analysis_uses_the_current_requests_label_everywhere(client, providers):
+    client.post("/api/analyze", json=body())
+    other = {"type": "point", "lat": 28.62, "lon": 77.22, "label": "New Delhi"}
+    data = client.post("/api/analyze", json=body(region=other)).json()
+    assert data["cached"] is True
+    assert data["region"]["label"] == "New Delhi"
+    assert all("Delhi, India" not in s for s in data["insights"])
+    assert any("New Delhi" in s for s in data["insights"])

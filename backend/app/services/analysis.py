@@ -15,10 +15,10 @@ from app.hazards.heatwave import METRIC_KEYS, HeatwaveParams
 from app.locks import KeyedLocks
 from app.models import AnalyzeRequest, BoxRegion
 from app.services.ingest import load_points
-from app.services.insights import build_insights
+from app.services.insights import REGION_TOKEN, build_insights
 from app.services.region import analysis_id, grid_points
 
-ALGO_VERSION = "v1"
+ALGO_VERSION = "v2"  # v2: region label filled in per response; p-value wording; count change clamped at 0
 PARAMS = HeatwaveParams()
 PCT_METRICS = {"HWN", "HWF", "HWD"}  # counts/days; HWM and HWA are °C, so absolute change only
 
@@ -79,7 +79,7 @@ async def compute_analysis(
     }
     sources = sorted({source for s in stored for source in s.sources})
     insights, caveats = build_insights(
-        req.region.label, req.start_year, req.end_year, result.yearly, trends, sources, len(points), flagged
+        REGION_TOKEN, req.start_year, req.end_year, result.yearly, trends, sources, len(points), flagged
     )
 
     selected = cleaned.tmax.loc[f"{req.start_year}-01-01":f"{req.end_year}-12-31"]
@@ -136,5 +136,6 @@ def to_response(doc: dict, cached: bool, label: str) -> dict:
     out["id"] = doc["_id"]
     out["cached"] = cached
     out["region"] = {**doc["region"], "label": label}
+    out["insights"] = [sentence.replace(REGION_TOKEN, label) for sentence in doc["insights"]]
     out["chart"] = build_chart(doc)
     return out

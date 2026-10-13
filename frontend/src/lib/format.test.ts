@@ -32,3 +32,10 @@ describe('format', () => {
     expect(mean([null])).toBeNull()
   })
 })
+
+describe('trend badge edge cases', () => {
+  it('does not call a zero-slope significant trend an increase or decrease', () => {
+    const t: Trend = { ...base, sen_per_decade: 0, change_kind: 'abs', change_value: 0 }
+    expect(trendBadge(t)).toEqual({ label: 'Significant but negligible', tone: 'flat' })
+  })
+})

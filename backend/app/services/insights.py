@@ -13,10 +13,18 @@ METRIC_TEXT = {
     "HWD": ("The longest heatwave each year", "days", "shows"),
 }
 
+# Insights are stored with this token and the region label is filled in per response,
+# because one cached analysis can be requested under different labels.
+REGION_TOKEN = "{region}"
+
 SOURCE_NAMES = {
     "nasa-power": "NASA POWER (MERRA-2 reanalysis, ~50 km grid)",
     "open-meteo-era5": "Open-Meteo (ERA5 reanalysis, ~25 km grid)",
 }
+
+
+def format_p(p: float) -> str:
+    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
 
 
 def describe_trend(metric: str, trend: dict, label: str, start_year: int, end_year: int) -> str:
@@ -29,6 +37,13 @@ def describe_trend(metric: str, trend: dict, label: str, start_year: int, end_ye
 
     sen = trend["sen_per_decade"]
     p = trend["mk_p"]
+    if trend["significant"] and sen == 0:
+        # Mann-Kendall can detect a consistent tendency in sparse counts while the
+        # typical (median) change is zero; don't call that an increase or decrease.
+        return (
+            f"{subject} in {label} {verb} a statistically consistent tendency ({format_p(p)}), "
+            f"but its typical size is close to zero ({sen:+.1f} {unit}/decade)."
+        )
     if trend["significant"]:
         direction = "increased" if sen > 0 else "decreased"
         if trend["change_kind"] == "pct":
@@ -37,14 +52,14 @@ def describe_trend(metric: str, trend: dict, label: str, start_year: int, end_ye
             amount = f"{abs(trend['change_value']):.1f} {unit}"
         return (
             f"{subject} in {label} {direction} by about {amount} between {start_year} and {end_year} "
-            f"({sen:+.1f} {unit}/decade; statistically significant, p = {p:.3f})."
+            f"({sen:+.1f} {unit}/decade; statistically significant, {format_p(p)})."
         )
     if sen == 0:
-        return f"{subject} in {label} {verb} no clear trend between {start_year} and {end_year} (p = {p:.2f})."
+        return f"{subject} in {label} {verb} no clear trend between {start_year} and {end_year} ({format_p(p)})."
     direction = "upward" if sen > 0 else "downward"
     return (
         f"{subject} in {label} {verb} a slight {direction} change ({sen:+.1f} {unit}/decade), "
-        f"but it is not statistically significant (p = {p:.2f}) and may reflect natural year-to-year variability."
+        f"but it is not statistically significant ({format_p(p)}) and may reflect natural year-to-year variability."
     )
 
 

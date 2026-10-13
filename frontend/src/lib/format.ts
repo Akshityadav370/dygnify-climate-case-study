@@ -18,6 +18,8 @@ export function formatP(p: number | null): string {
 export function trendBadge(trend: Trend): { label: string; tone: 'up' | 'down' | 'flat' | 'na' } {
   if (trend.reason || trend.sen_per_decade === null) return { label: 'Not enough years', tone: 'na' }
   if (!trend.significant) return { label: 'No significant trend', tone: 'flat' }
+  // A consistent tendency whose typical (median) change is zero is not an increase or decrease.
+  if (trend.sen_per_decade === 0) return { label: 'Significant but negligible', tone: 'flat' }
   return trend.sen_per_decade > 0
     ? { label: '▲ Significant increase', tone: 'up' }
     : { label: '▼ Significant decrease', tone: 'down' }

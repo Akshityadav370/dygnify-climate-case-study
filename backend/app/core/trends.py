@@ -95,16 +95,20 @@ def analyze_trend(
     # Change along the Sen line, not between two noisy individual years.
     start_value = intercept + slope * start_year
     end_value = intercept + slope * end_year
+    if allow_pct:
+        # Counts and day totals cannot go below zero, even if the fitted line does.
+        start_value, end_value = max(start_value, 0.0), max(end_value, 0.0)
     if allow_pct and start_value >= 1:
         change_kind, change_value = "pct", (end_value - start_value) / start_value * 100
     else:
         change_kind, change_value = "abs", end_value - start_value
 
+    reported_p = round(p_value, 4)
     return Trend(
         n_years=len(pairs),
         sen_per_decade=round(slope * 10, 2),
-        mk_p=round(p_value, 4),
-        significant=p_value < SIGNIFICANCE_LEVEL,
+        mk_p=reported_p,
+        significant=reported_p < SIGNIFICANCE_LEVEL,  # decide on the value we show, so text never contradicts it
         ols_slope=round(ols_slope, 4),
         ols_intercept=round(ols_intercept, 4),
         change_kind=change_kind,

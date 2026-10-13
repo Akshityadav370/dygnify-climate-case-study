@@ -29,3 +29,11 @@ describe('region helpers', () => {
     expect(selectionProblem({ hazard: 'heatwave', region, startYear: 1990, endYear: 2020 }, 1981, 2025)).toBeNull()
   })
 })
+
+describe('state labels', () => {
+  it('marks clipped states in the label', async () => {
+    const { stateLabel } = await import('./region')
+    expect(stateLabel('Rajasthan, India', true)).toBe('Rajasthan, India (central 5°×5° box)')
+    expect(stateLabel('Goa, India', false)).toBe('Goa, India')
+  })
+})

@@ -17,6 +17,12 @@ def test_clip_box_shrinks_large_boxes_around_centre():
     assert box == {"south": 24.5, "west": 71.5, "north": 29.5, "east": 76.5}
 
 
+def test_clip_box_centres_on_given_point_and_handles_antimeridian():
+    box, clipped = clip_box({"south": 51.0, "west": -179.9, "north": 71.5, "east": 179.9}, centre=(64.4, -150.0))
+    assert clipped is True
+    assert box == {"south": 61.9, "west": -152.5, "north": 66.9, "east": -147.5}
+
+
 def test_clip_box_keeps_small_boxes():
     box, clipped = clip_box({"south": 1.0, "west": 2.0, "north": 3.0, "east": 4.0})
     assert clipped is False

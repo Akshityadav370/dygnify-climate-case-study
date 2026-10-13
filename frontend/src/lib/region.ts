@@ -37,3 +37,7 @@ export function selectionProblem(sel: Selection, minYear: number, maxYear: numbe
   if (sel.startYear < minYear || sel.endYear > maxYear) return `Years must be between ${minYear} and ${maxYear}.`
   return null
 }
+
+export function stateLabel(label: string, clipped: boolean): string {
+  return clipped ? `${label} (central 5°×5° box)` : label
+}

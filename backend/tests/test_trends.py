@@ -66,3 +66,21 @@ def test_flat_noise_is_not_significant():
     trend = analyze_trend(years, values, set(), 2001, 2020)
     assert trend.significant is False
     assert trend.mk_p > 0.05
+
+
+
+def test_declining_counts_never_report_more_than_minus_100_percent():
+    years = list(range(2001, 2021))
+    values = [12.0, 10.0, 8.0, 6.0, 4.0, 2.0] + [0.0] * 14  # Sen line goes below zero by 2020
+    trend = analyze_trend(years, values, set(), 2001, 2020)
+    assert trend.change_kind == "pct"
+    assert trend.change_value == -100.0
+
+
+def test_significance_uses_the_reported_rounded_p_value(monkeypatch):
+    import app.core.trends as trends
+
+    monkeypatch.setattr(trends, "mann_kendall", lambda y: (5, 0.04996))
+    trend = analyze_trend(list(range(2001, 2021)), [float(v) for v in range(1, 21)], set(), 2001, 2020)
+    assert trend.mk_p == 0.05
+    assert trend.significant is False

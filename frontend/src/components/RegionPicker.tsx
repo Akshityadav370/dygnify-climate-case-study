@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Region } from '../api/types'
-import { boxProblem } from '../lib/region'
+import { boxProblem, stateLabel } from '../lib/region'
 import { BoxInputs } from './BoxInputs'
 import { PlaceSearch } from './PlaceSearch'
 import { RegionMap } from './RegionMap'
@@ -42,7 +42,7 @@ export function RegionPicker({ region, onChange }: Props) {
           kind="state"
           onSelect={(r) => {
             if (!r.bbox) return
-            onChange({ type: 'box', ...r.bbox, label: r.label })
+            onChange({ type: 'box', ...r.bbox, label: stateLabel(r.label, r.clipped) })
             setNote(r.clipped ? 'This state is larger than 5° × 5°, so a 5° × 5° box around its centre is analysed.' : null)
           }}
         />

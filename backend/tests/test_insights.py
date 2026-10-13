@@ -34,13 +34,13 @@ def test_not_significant_sentence_mentions_natural_variability():
     text = describe_trend("HWN", trend(significant=False, mk_p=0.31, sen_per_decade=0.2), "Paris", 1991, 2020)
     assert text == (
         "The number of heatwave events in Paris shows a slight upward change (+0.2 events/decade), "
-        "but it is not statistically significant (p = 0.31) and may reflect natural year-to-year variability."
+        "but it is not statistically significant (p = 0.310) and may reflect natural year-to-year variability."
     )
 
 
 def test_zero_slope_sentence():
     text = describe_trend("HWF", trend(significant=False, mk_p=0.9, sen_per_decade=0.0), "Paris", 1991, 2020)
-    assert text == "Heatwave days in Paris show no clear trend between 1991 and 2020 (p = 0.90)."
+    assert text == "Heatwave days in Paris show no clear trend between 1991 and 2020 (p = 0.900)."
 
 
 def test_insufficient_years_sentence():
@@ -72,3 +72,18 @@ def test_caveats_cover_fallback_area_average_and_low_quality_years():
     assert "fallback" in joined
     assert "average of 4 grid points" in joined
     assert "2015" in joined
+
+
+def test_significant_trend_with_zero_slope_does_not_claim_a_change():
+    text = describe_trend("HWN", trend(sen_per_decade=0.0, mk_p=0.0004, change_kind="abs", change_value=0.0),
+                          "Oslo", 1991, 2020)
+    assert "increased" not in text and "decreased" not in text
+    assert "close to zero" in text
+    assert "p < 0.001" in text
+
+
+def test_p_values_use_three_decimals_or_less_than_bound():
+    not_sig = describe_trend("HWF", trend(significant=False, mk_p=0.0502, sen_per_decade=-2.3), "Delhi", 1991, 2020)
+    assert "p = 0.050" in not_sig
+    sig = describe_trend("HWF", trend(mk_p=0.0001), "Delhi", 1991, 2020)
+    assert "p < 0.001" in sig
