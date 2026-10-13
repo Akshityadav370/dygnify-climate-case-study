@@ -37,7 +37,7 @@ def power_payload(lat, lon, start, end, tmax_fn=synthetic_tmax, fill_days=frozen
     }
 
 
-def openmeteo_payload(lat, lon, start, end, tmax_fn=synthetic_tmax) -> dict:
+def openmeteo_payload(lat, lon, start, end, tmax_fn=synthetic_tmax, missing_days=frozenset()) -> dict:
     ds = days(start, end)
     return {
         "latitude": lat + 0.02,
@@ -45,7 +45,7 @@ def openmeteo_payload(lat, lon, start, end, tmax_fn=synthetic_tmax) -> dict:
         "daily_units": {"time": "iso8601", "temperature_2m_max": "°C", "precipitation_sum": "mm"},
         "daily": {
             "time": [d.isoformat() for d in ds],
-            "temperature_2m_max": [tmax_fn(d) for d in ds],
+            "temperature_2m_max": [None if d in missing_days else tmax_fn(d) for d in ds],
             "precipitation_sum": [0.0 for _ in ds],
         },
     }
@@ -62,12 +62,12 @@ def power_responder(tmax_fn=synthetic_tmax, fill_days=frozenset()):
     return respond
 
 
-def openmeteo_responder(tmax_fn=synthetic_tmax):
+def openmeteo_responder(tmax_fn=synthetic_tmax, missing_days=frozenset()):
     def respond(request: httpx.Request) -> httpx.Response:
         p = request.url.params
         payload = openmeteo_payload(
             float(p["latitude"]), float(p["longitude"]),
-            date.fromisoformat(p["start_date"]), date.fromisoformat(p["end_date"]), tmax_fn,
+            date.fromisoformat(p["start_date"]), date.fromisoformat(p["end_date"]), tmax_fn, missing_days,
         )
         return httpx.Response(200, json=payload)
 

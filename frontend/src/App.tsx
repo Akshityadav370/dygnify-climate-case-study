@@ -42,7 +42,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Climate Hazard Trend Analyzer</h1>
-        <p className="muted">How have heatwaves changed where you live? Data: NASA POWER, 1981 onward.</p>
+        <p className="muted">How have heatwaves changed where you live? Data: Open-Meteo (ERA5), NASA POWER fallback, 1981 onward.</p>
       </header>
       <main className="layout">
         <aside className="controls">

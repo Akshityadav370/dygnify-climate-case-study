@@ -9,7 +9,7 @@ as charts, a table of events and plain-language insights.
 ## Architecture
 
 ```
-React + TS (Vercel) ──HTTPS──► FastAPI (Render) ──► NASA POWER (primary) / Open-Meteo (fallback)
+React + TS (Vercel) ──HTTPS──► FastAPI (Render) ──► Open-Meteo (primary) / NASA POWER (fallback)
                                      │              Open-Meteo geocoding, Nominatim (states)
                                      ▼
                               MongoDB Atlas
@@ -20,7 +20,7 @@ How `POST /api/analyze` works:
 1. Validate the input.
 2. Snap the region to the MERRA-2 grid (0.5° × 0.625°).
 3. If this analysis is already cached, return it.
-4. Otherwise, load each grid cell's 1981→present daily series from `weather_daily`. Cells that are missing are fetched from NASA POWER, falling back to Open-Meteo.
+4. Otherwise, load each grid cell's 1981→present daily series from `weather_daily`. Cells that are missing are fetched from Open-Meteo, falling back to NASA POWER.
 5. Clean the data and average the points.
 6. Detect heatwaves, then compute trends and insights.
 7. Store the result with a 30-day expiry.
@@ -38,20 +38,22 @@ How `POST /api/analyze` works:
 
 | Source | Use |
 |---|---|
-| [NASA POWER](https://power.larc.nasa.gov/docs/services/api/) daily point API (MERRA-2) | Primary: `T2M_MAX` (°C) and `PRECTOTCORR` (mm/day), 1981→present, no key |
-| [Open-Meteo Historical](https://open-meteo.com/en/docs/historical-weather-api) (ERA5) | Fallback for each grid cell |
+| [Open-Meteo Historical](https://open-meteo.com/en/docs/historical-weather-api) (ERA5) | Primary: `temperature_2m_max` (°C) and `precipitation_sum` (mm), no key |
+| [NASA POWER](https://power.larc.nasa.gov/docs/services/api/) daily point API (MERRA-2) | Fallback for each grid cell: `T2M_MAX` (°C) and `PRECTOTCORR` (mm/day), 1981→present, no key |
 | [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api) | City search |
 | [Nominatim](https://nominatim.org/release-docs/latest/api/Search/) | State bounding boxes (1 request/s, cached 7 days) |
 
-**Why NASA POWER is primary:** Open-Meteo's free tier counts every ~2 weeks of data as one API call,
-with a limit of 10,000 calls per day. One location's 45-year history costs about 1,170 calls, so only a
-handful of new places per day would be possible. NASA POWER returned 45 years for one point in about 2 s,
-with no quota.
+**Why there is a fallback:** Open-Meteo's free tier counts every ~2 weeks of data as one API call
+(600 per minute, 5,000 per hour, 10,000 per day). One location's 45-year history costs about 1,170 calls,
+which is more than the per-minute limit. In practice Open-Meteo can serve roughly one new grid cell per
+minute and a few per hour. When it refuses or fails, that cell is fetched from NASA POWER instead (about
+2 s for 45 years, no published quota), and the results say so. Each cell is downloaded only once and then
+served from MongoDB.
 
 ## Heatwave logic
 
 1. **Cleaning**
-   - POWER's `-999` fill values and Open-Meteo `null`s become missing values.
+   - Open-Meteo `null`s and POWER's `-999` fill values become missing values.
    - Values outside −90…60 °C are removed, and units are checked.
    - Gaps of up to 2 days are filled by linear interpolation. Longer gaps stay missing and break heatwave runs.
    - Years with more than 10% missing days are flagged as low quality and excluded from trends.
@@ -131,9 +133,10 @@ cd frontend && cp .env.example .env && npm install && npm run dev     # http://l
 
 ## Assumptions
 
-- **Data:** reanalysis data (MERRA-2 via NASA POWER, with ERA5 as fallback) stands in for weather-station
-  observations. It is consistent worldwide but smooths local extremes. Analysis starts in 1981, the first
-  year POWER provides.
+- **Data:** reanalysis data (ERA5 via Open-Meteo, with MERRA-2 via NASA POWER as fallback) stands in for
+  weather-station observations. It is consistent worldwide but smooths local extremes. Analysis starts in
+  1981 so both sources cover the full range and the 1981–2010 baseline. A box can mix cells from both
+  sources; the results add a caveat when the fallback was used.
 - **Baseline:** 1981–2010 (a WMO 30-year normal), fixed regardless of the selected years.
 - **Heatwaves can happen in any season.** The threshold is computed separately for each calendar day, so a
   heatwave means "unusually hot for this time of year". For example, in Delhi several detected events are
@@ -159,7 +162,7 @@ cd frontend && cp .env.example .env && npm install && npm run dev     # http://l
 
 - **Claude Code (Claude Opus 5.5)** was used to:
   - Explain the climate-statistics concepts: percentile thresholds, Sen's slope, Mann-Kendall and interpolation.
-  - Compare data sources. It measured Open-Meteo's quota cost and NASA POWER's speed with live requests, which led to switching the primary source.
+  - Compare data sources. It measured Open-Meteo's quota cost and NASA POWER's speed with live requests, which shaped the fallback design.
   - Write the design spec and the implementation plan.
   - Generate code and tests task by task, and run browser checks of the UI.
 

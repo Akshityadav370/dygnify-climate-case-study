@@ -1,8 +1,8 @@
 import pytest
 import respx
 
-from app.clients.power import POWER_URL
-from tests.fakes import power_responder
+from app.clients.openmeteo import ARCHIVE_URL
+from tests.fakes import openmeteo_responder
 
 BODY = {"region": {"type": "point", "lat": 28.61, "lon": 77.21, "label": "Delhi"}, "start_year": 1990, "end_year": 2020}
 
@@ -10,7 +10,7 @@ BODY = {"region": {"type": "point", "lat": 28.61, "lon": 77.21, "label": "Delhi"
 @pytest.fixture
 def analysis_id(client):
     with respx.mock:
-        respx.get(POWER_URL).mock(side_effect=power_responder())
+        respx.get(ARCHIVE_URL).mock(side_effect=openmeteo_responder())
         return client.post("/api/analyze", json=BODY).json()["id"]
 
 

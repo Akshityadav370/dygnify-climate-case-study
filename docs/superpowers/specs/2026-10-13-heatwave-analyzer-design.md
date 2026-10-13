@@ -1,7 +1,7 @@
 # Climate Hazard Trend Analyzer — Heatwave Design Spec
 
 - **Date:** 2026-10-13
-- **Status:** Approved 2026-10-13; revised same day — data source changed to NASA POWER (primary) + Open-Meteo (fallback) after measuring Open-Meteo's free-tier quota
+- **Status:** Approved 2026-10-13; revised same day — NASA POWER added as a fallback after measuring Open-Meteo's free-tier quota. Later revision (user decision): Open-Meteo is primary, NASA POWER is the fallback.
 - **Scope:** Heatwave hazard end-to-end (frontend, backend, database, deployment). Other hazards (heavy rainfall, drought) are later, separate specs that plug into the same pipeline.
 
 ---

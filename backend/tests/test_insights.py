@@ -69,7 +69,7 @@ def test_caveats_cover_fallback_area_average_and_low_quality_years():
         ["nasa-power", "open-meteo-era5"], 4, [2015],
     )
     joined = " ".join(caveats)
-    assert "fallback" in joined
+    assert "fallback source NASA POWER" in joined
     assert "average of 4 grid points" in joined
     assert "2015" in joined
 

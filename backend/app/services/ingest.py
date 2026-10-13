@@ -1,8 +1,8 @@
 """Raw weather cache: one `weather_daily` document per grid cell.
 
 A cell is fetched once (1981 -> last complete year) and reused by every
-region and year range that touches it. NASA POWER is tried first; Open-Meteo
-is the per-cell fallback.
+region and year range that touches it. Open-Meteo (ERA5) is tried first;
+NASA POWER is the per-cell fallback (Open-Meteo's free quota is small).
 """
 
 import asyncio
@@ -59,10 +59,10 @@ def append_series(old: DailySeries, tail: DailySeries) -> DailySeries:
 async def fetch_with_fallback(upstream: UpstreamClient, lat: float, lon: float, start: date, end: date) -> DailySeries:
     async with upstream.concurrency:
         try:
-            return await fetch_power(upstream, lat, lon, start, end)
-        except UpstreamError as exc:
-            logger.warning("NASA POWER failed for %s,%s (%s); trying Open-Meteo", lat, lon, exc.message)
             return await fetch_openmeteo(upstream, lat, lon, start, end)
+        except UpstreamError as exc:
+            logger.warning("Open-Meteo failed for %s,%s (%s); trying NASA POWER", lat, lon, exc.message)
+            return await fetch_power(upstream, lat, lon, start, end)
 
 
 async def load_point(

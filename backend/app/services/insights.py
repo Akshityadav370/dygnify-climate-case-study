@@ -104,9 +104,10 @@ def build_insights(
         caveats.append(
             f"Region results are the average of {n_points} grid points; local hotspots inside the region may differ."
         )
-    if "open-meteo-era5" in sources_used:
+    if "nasa-power" in sources_used:
         caveats.append(
-            "Some or all data came from the fallback source Open-Meteo (ERA5) because NASA POWER was unavailable."
+            "Some or all data came from the fallback source NASA POWER (MERRA-2) because Open-Meteo was unavailable "
+            "or over its free-tier quota; mixing sources can slightly shift results."
         )
     if low_quality_years:
         years = ", ".join(str(y) for y in low_quality_years)
