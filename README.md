@@ -126,7 +126,7 @@ cd frontend && cp .env.example .env && npm install && npm run dev     # http://l
    - Copy the connection string.
 2. **Render:**
    - New → Blueprint → this repo. It uses `render.yaml`.
-   - Set `MONGO_URI`, `CORS_ORIGINS=["https://<your-app>.vercel.app"]` and `NOMINATIM_USER_AGENT=climate-hazard-analyzer/1.0 (<contact>)`.
+   - Set `MONGO_URI`, `CORS_ORIGINS=https://<your-app>.vercel.app` (comma-separate several origins) and `NOMINATIM_USER_AGENT=climate-hazard-analyzer/1.0 (<contact>)`.
    - Free instances sleep when idle, so the first request can take 30–60 s.
 3. **Vercel:** import the repo with root directory `frontend` and framework Vite, and set the environment variable `VITE_API_BASE_URL=https://<render-app>.onrender.com`.
 4. Run the seed script against the Render URL so the demo cities load instantly.

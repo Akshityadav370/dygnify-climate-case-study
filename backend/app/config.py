@@ -1,7 +1,10 @@
+import json
 from datetime import date
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # NASA POWER daily data starts on 1981-01-01.
 DATA_START_YEAR = 1981
@@ -17,7 +20,8 @@ class Settings(BaseSettings):
 
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db: str = "climate_hazards"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    # Env value may be a JSON list or a comma-separated list of origins.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     nominatim_user_agent: str = "climate-hazard-analyzer/0.1 (set NOMINATIM_USER_AGENT)"
 
     http_connect_timeout: float = 10.0
@@ -32,6 +36,14 @@ class Settings(BaseSettings):
 
     analysis_ttl_days: int = 30
     geocode_ttl_days: int = 7
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_origins(cls, value):
+        if isinstance(value, str):
+            value = json.loads(value) if value.strip().startswith("[") else value.split(",")
+        # Browsers send Origin without a trailing slash.
+        return [origin.strip().rstrip("/") for origin in value if origin.strip()]
 
 
 @lru_cache
